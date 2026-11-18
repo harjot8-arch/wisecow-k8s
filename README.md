@@ -20,7 +20,9 @@ push to main
  deploy ────── kind cluster → cert-manager + Envoy Gateway → kubectl apply -k k8s
                → wait: rollout, certificate Ready, Gateway Programmed
                → verify over HTTPS: trusted cert, TLS ≥1.2, security headers,
-                 HTTP→HTTPS redirect, untrusted cert rejected, health checker UP
+                 TLS 1.3 accepted / 1.1 refused, HTTP→HTTPS redirect,
+                 untrusted cert rejected, health checker UP
+               → resilience: deleted pod is replaced; hung app is restarted by its probe
 ```
 
 Each run's summary page shows the live pods, the certificate, the response headers and the cow.
@@ -99,7 +101,7 @@ python3 scripts/app_health.py https://example.com --interval 30
 boundaries, UP/DOWN for real HTTP status codes from a local test server, retries on refused
 connections, exit codes, HTML escaping, byte-accurate `Content-Length` with Unicode, and the CSP hash.
 
-Full test plan (35 cases, with which ones CI runs): [`docs/TEST_CASES.md`](docs/TEST_CASES.md),
+Full test plan (35 cases, all run by CI on every push): [`docs/TEST_CASES.md`](docs/TEST_CASES.md),
 also as [`docs/test-cases.csv`](docs/test-cases.csv).
 
 ## Layout

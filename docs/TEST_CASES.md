@@ -1,6 +1,6 @@
 # Test cases
 
-Every case marked **CI** runs automatically on each push in `.github/workflows/ci-cd.yml`.
+All 35 cases run automatically on each push in `.github/workflows/ci-cd.yml`.
 A spreadsheet version is in [`test-cases.csv`](test-cases.csv) (import into Google Sheets).
 
 | ID | Area | Test case | Steps | Expected result | Type | How |
@@ -19,12 +19,12 @@ A spreadsheet version is in [`test-cases.csv`](test-cases.csv) (import into Goog
 | TC-12 | Kubernetes | Manifests are valid | kubeconform, strict | All resources valid | Static | CI |
 | TC-13 | Kubernetes | Deployment rolls out | `kubectl rollout status` | 2/2 pods ready | Functional | CI |
 | TC-14 | Kubernetes | Namespace enforces restricted Pod Security | Apply manifests | Pods admitted (proves they meet `restricted`) | Security | CI |
-| TC-15 | Kubernetes | Pod self-heals | Delete a pod | Replacement is Ready within 30 s | Reliability | Manual |
-| TC-16 | Kubernetes | Liveness probe restarts a hung app | Make `/healthz` fail | Container restarted | Reliability | Manual |
+| TC-15 | Kubernetes | Pod self-heals | Delete a pod | Replacement Ready, 2/2 replicas within 60 s | Reliability | CI |
+| TC-16 | Kubernetes | Liveness probe restarts a hung app | Freeze the `nc` listener (SIGSTOP) so the app stops answering | Container restarted (restartCount 1), Ready again | Reliability | CI |
 | TC-17 | TLS | Certificate issued | `kubectl wait certificate --for=Ready` | Ready | Functional | CI |
 | TC-18 | TLS | HTTPS works with the trusted CA | `curl --cacert ca.crt https://wisecow.local` | `200`, cow page | Functional | CI |
 | TC-19 | TLS | Untrusted certificate rejected | `curl` without the CA | TLS verification error | Security | CI |
-| TC-20 | TLS | Old TLS refused, TLS 1.2+ accepted | `curl --tlsv1.2`; `openssl s_client -tls1_1` | 1.2+ works; 1.1 fails | Security | CI (1.2) + Manual (1.1) |
+| TC-20 | TLS | Modern TLS accepted, old TLS refused | `curl --tlsv1.2`; `openssl s_client -tls1_3` and `-tls1_1` (client allows weak, so only the server can refuse) | 1.2 and 1.3 work; 1.1 refused | Security | CI |
 | TC-21 | TLS | HTTP redirects to HTTPS | `GET http://wisecow.local` | `301` to `https://` | Security | CI |
 | TC-22 | TLS | Security headers present | Inspect HTTPS response | HSTS, CSP, nosniff, X-Frame-Options | Security | CI |
 | TC-23 | CI/CD | Image pushed to registry | Push to `main` | `ghcr.io/harjot8-arch/wisecow:sha-<commit>` and `:latest` exist | Functional | CI |
