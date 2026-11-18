@@ -168,6 +168,13 @@ jobs:
           grep -qi '^strict-transport-security:' headers.txt
           grep -qi '^content-security-policy:' headers.txt
           grep -qi '^x-content-type-options: nosniff' headers.txt
+          grep -qi '^x-frame-options: deny' headers.txt
+          echo "2b. TLS 1.3 accepted, TLS 1.1 refused by the server"
+          tls() { openssl s_client -connect 127.0.0.1:8443 -servername wisecow.local -cipher 'DEFAULT@SECLEVEL=0' "$@" </dev/null >/dev/null 2>&1; }
+          tls -tls1_3
+          ! tls -tls1_1
+          echo "2c. Pods run the exact image built from this commit"
+          test "$(kubectl -n wisecow get deploy/wisecow -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$IMAGE_REF"
           echo "3. Plain HTTP redirects to HTTPS"
           curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' http://wisecow.local:8080/ | tee redirect.txt
           grep -q '^301 https://wisecow.local' redirect.txt
@@ -181,6 +188,22 @@ jobs:
             echo '### Response headers'; echo '```'; cat headers.txt; echo '```'
             echo '### Page'; echo '```'; sed -n '/<pre>/,/<\/pre>/p' page.html; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Resilience - a deleted pod is replaced
+        run: |
+          victim=$(kubectl -n wisecow get pod -l app=wisecow -o jsonpath='{.items[0].metadata.name}')
+          kubectl -n wisecow delete pod "$victim" --wait=false
+          kubectl -n wisecow wait pod/"$victim" --for=delete --timeout=60s
+          kubectl -n wisecow rollout status deploy/wisecow --timeout=60s
+          test "$(kubectl -n wisecow get deploy/wisecow -o jsonpath='{.status.readyReplicas}')" = 2
+      - name: Resilience - the liveness probe restarts a hung app
+        run: |
+          pod=$(kubectl -n wisecow get pod -l app=wisecow -o jsonpath='{.items[0].metadata.name}')
+          # Freeze the netcat listener: the app stops answering but the process is still alive.
+          kubectl -n wisecow exec "$pod" -- bash -c \
+            'for p in /proc/[0-9]*; do [ "$(cat "$p/comm")" = nc ] && kill -STOP "${p#/proc/}"; done'
+          kubectl -n wisecow wait pod/"$pod" --timeout=150s \
+            --for=jsonpath='{.status.containerStatuses[0].restartCount}'=1
+          kubectl -n wisecow wait pod/"$pod" --for=condition=Ready --timeout=60s
       - name: Debug on failure
         if: failure()
         run: |
