@@ -200,7 +200,8 @@ jobs:
           pod=$(kubectl -n wisecow get pod -l app=wisecow -o jsonpath='{.items[0].metadata.name}')
           # Freeze the netcat listener: the app stops answering but the process is still alive.
           kubectl -n wisecow exec "$pod" -- bash -c \
-            'for p in /proc/[0-9]*; do [ "$(cat "$p/comm")" = nc ] && kill -STOP "${p#/proc/}"; done'
+            'pids=; for p in /proc/[0-9]*; do [ "$(cat "$p/comm" 2>/dev/null)" = nc ] && pids="$pids ${p#/proc/}"; done
+             test -n "$pids" && kill -STOP $pids'
           kubectl -n wisecow wait pod/"$pod" --timeout=150s \
             --for=jsonpath='{.status.containerStatuses[0].restartCount}'=1
           kubectl -n wisecow wait pod/"$pod" --for=condition=Ready --timeout=60s
