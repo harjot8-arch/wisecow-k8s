@@ -170,7 +170,7 @@ jobs:
           grep -qi '^x-content-type-options: nosniff' headers.txt
           echo "3. Plain HTTP redirects to HTTPS"
           curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' http://wisecow.local:8080/ | tee redirect.txt
-          grep -q '^301 https://' redirect.txt
+          grep -q '^301 https://wisecow.local/' redirect.txt
           echo "4. An untrusted certificate is rejected"
           ! curl -sS "$url" -o /dev/null 2>/dev/null
           echo "5. The app health checker from Problem Statement 2 agrees"

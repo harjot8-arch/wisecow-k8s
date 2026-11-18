@@ -49,4 +49,4 @@ spec:
   rules:
     - filters:
         - type: RequestRedirect
-          requestRedirect: { scheme: https, statusCode: 301 }
+          requestRedirect: { scheme: https, port: 443, statusCode: 301 }
