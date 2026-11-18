@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wisecow
+  labels:
+    # Reject any pod in this namespace that is not locked down.
+    pod-security.kubernetes.io/enforce: restricted

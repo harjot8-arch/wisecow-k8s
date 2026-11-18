@@ -1,0 +1,182 @@
+name: CI/CD
+
+# Every push to main: lint -> test -> build, scan and push the image -> deploy it to a
+# fresh Kubernetes cluster with TLS -> prove it works over HTTPS.
+# Pull requests run everything except the push to the registry.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/wisecow
+  CERT_MANAGER_VERSION: v1.21.3
+  ENVOY_GATEWAY_VERSION: v1.10.0
+  KUBECONFORM_VERSION: v0.8.0
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: ShellCheck wisecow.sh
+        run: shellcheck wisecow.sh
+      - name: Hadolint Dockerfile
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+          ignore: DL3008 # apt version pins break on every Debian point release
+      - name: Validate Kubernetes manifests against their schemas
+        run: |
+          curl -sSfL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar xz kubeconform
+          kubectl kustomize k8s | ./kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - run: uvx ruff check && uvx ruff format --check
+      - run: uvx pytest -v
+      - name: Run both scripts on this runner
+        run: |
+          python3 scripts/sys_health.py --cpu 101 --mem 101 --disk 101 --procs 100000
+          python3 scripts/app_health.py https://github.com
+
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ env.IMAGE }}:sha-${{ steps.short.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: short
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build (and load locally for the scan)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test the container
+        run: |
+          docker run -d --name wisecow -p 4499:4499 --read-only --tmpfs /tmp --cap-drop ALL "${IMAGE}:sha-${{ steps.short.outputs.sha }}"
+          for i in $(seq 20); do curl -fsS localhost:4499/healthz && break; sleep 1; done
+          curl -fsS localhost:4499/ | tee page.html | grep -q '<pre>'
+          test "$(docker exec wisecow id -u)" = 10001
+      - name: Scan image for vulnerabilities (fail on fixable critical)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: ${{ env.IMAGE }}:sha-${{ steps.short.outputs.sha }}
+          severity-cutoff: critical
+          only-fixed: true
+          output-format: table
+      - name: Push to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        run: docker push --all-tags "${IMAGE}"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_REF: ${{ needs.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Create Kubernetes cluster (kind)
+        uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
+        with:
+          cluster_name: wisecow
+      - name: Load the image built above into the cluster
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            docker build -t "$IMAGE_REF" .   # PRs never push, so rebuild locally
+          else
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            docker pull "$IMAGE_REF"         # proves the registry round trip
+          fi
+          kind load docker-image "$IMAGE_REF" --name wisecow
+      - name: Install cert-manager and Envoy Gateway
+        run: |
+          helm install cert-manager oci://quay.io/jetstack/charts/cert-manager --version "$CERT_MANAGER_VERSION" \
+            -n cert-manager --create-namespace --set crds.enabled=true --wait
+          helm template eg-crds oci://docker.io/envoyproxy/gateway-crds-helm --version "$ENVOY_GATEWAY_VERSION" \
+            --set crds.gatewayAPI.enabled=true --set crds.envoyGateway.enabled=true | kubectl apply --server-side -f -
+          helm install eg oci://docker.io/envoyproxy/gateway-helm --version "$ENVOY_GATEWAY_VERSION" \
+            -n envoy-gateway-system --create-namespace --skip-crds --wait
+          kubectl apply -f ci/gatewayclass.yaml
+      - name: Deploy wisecow (pinned to the image just built)
+        run: |
+          sed -i "s/newTag: latest/newTag: ${IMAGE_REF##*:}/" k8s/kustomization.yaml
+          kubectl apply -k k8s
+          kubectl -n wisecow rollout status deploy/wisecow --timeout=120s
+          kubectl -n wisecow wait certificate/wisecow-tls --for=condition=Ready --timeout=120s
+          kubectl -n wisecow wait gateway/wisecow --for=condition=Programmed --timeout=180s
+      - name: Verify HTTPS end to end
+        run: |
+          echo "127.0.0.1 wisecow.local" | sudo tee -a /etc/hosts
+          svc=$(kubectl -n envoy-gateway-system get svc -o name \
+            -l gateway.envoyproxy.io/owning-gateway-name=wisecow,gateway.envoyproxy.io/owning-gateway-namespace=wisecow)
+          kubectl -n envoy-gateway-system port-forward "$svc" 8443:443 8080:80 >/dev/null 2>&1 &
+          kubectl -n wisecow get secret wisecow-tls -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
+          url=https://wisecow.local:8443/
+          for i in $(seq 30); do curl -fsS --cacert ca.crt "$url" -o /dev/null && break; sleep 2; done
+
+          echo "1. Certificate is trusted, TLS 1.2+ and the cow answers"
+          curl -fsS --cacert ca.crt --tlsv1.2 -D headers.txt "$url" -o page.html
+          grep -q '<pre>' page.html
+          echo "2. Security headers are present"
+          grep -qi '^strict-transport-security:' headers.txt
+          grep -qi '^content-security-policy:' headers.txt
+          grep -qi '^x-content-type-options: nosniff' headers.txt
+          echo "3. Plain HTTP redirects to HTTPS"
+          curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' http://wisecow.local:8080/ | tee redirect.txt
+          grep -q '^301 https://' redirect.txt
+          echo "4. An untrusted certificate is rejected"
+          ! curl -sS "$url" -o /dev/null 2>/dev/null
+          echo "5. The app health checker from Problem Statement 2 agrees"
+          python3 scripts/app_health.py "$url" --cafile ca.crt
+          {
+            echo "## Wisecow deployed to Kubernetes over HTTPS"
+            echo '```'; kubectl -n wisecow get deploy,pods,svc,certificate,gateway,httproute; echo '```'
+            echo '### Response headers'; echo '```'; cat headers.txt; echo '```'
+            echo '### Page'; echo '```'; sed -n '/<pre>/,/<\/pre>/p' page.html; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Debug on failure
+        if: failure()
+        run: |
+          kubectl get pods -A
+          kubectl -n wisecow describe deploy,pods,certificate,gateway,httproute
+          kubectl -n wisecow logs deploy/wisecow --tail=50 || true

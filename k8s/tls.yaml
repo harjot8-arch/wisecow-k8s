@@ -1,0 +1,22 @@
+# TLS certificate issued and renewed by cert-manager.
+# Self-signed here so it works in any cluster; for a public domain swap the
+# Issuer for an ACME (Let's Encrypt) one. Nothing else changes.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wisecow-tls
+spec:
+  secretName: wisecow-tls
+  commonName: wisecow.local
+  dnsNames: [wisecow.local]
+  duration: 2160h # 90 days
+  renewBefore: 360h # 15 days
+  privateKey: { algorithm: ECDSA, size: 256, rotationPolicy: Always }
+  issuerRef: { name: selfsigned, kind: Issuer }

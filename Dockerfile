@@ -1,23 +1,19 @@
-# Small, well-known base image.
+# syntax=docker/dockerfile:1
 FROM debian:bookworm-slim
 
-# The three tools wisecow.sh needs:
-#   fortune-mod + fortunes-min -> random quotes
-#   cowsay                     -> draws the cow
-#   netcat-openbsd             -> tiny TCP server (supports `nc -lN`)
+# What wisecow.sh needs: fortune (quotes), cowsay (the cow), netcat-openbsd (`nc -lN`).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends fortune-mod fortunes-min cowsay netcat-openbsd \
  && rm -rf /var/lib/apt/lists/*
 
-# Debian installs fortune and cowsay in /usr/games, which is not on PATH by default.
-ENV PATH="/usr/games:${PATH}"
+# Debian installs fortune and cowsay into /usr/games, which is not on PATH by default.
+ENV PATH="/usr/games:${PATH}" \
+    SRVPORT=4499 \
+    RSPFILE=/tmp/wisecow-response
 
-# Run as a normal user, not root (least privilege).
-RUN useradd --create-home --uid 10001 wisecow
-WORKDIR /app
-COPY --chown=wisecow:wisecow wisecow.sh .
-RUN chmod +x wisecow.sh
-USER 10001
+COPY --chmod=0555 wisecow.sh /app/wisecow.sh
 
+# Never run as root. The UID matches runAsUser in k8s/deployment.yaml.
+USER 10001:10001
 EXPOSE 4499
-CMD ["./wisecow.sh"]
+ENTRYPOINT ["/app/wisecow.sh"]

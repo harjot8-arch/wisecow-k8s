@@ -1,0 +1,7 @@
+# Cluster-wide: tells Kubernetes that Gateways of class "eg" are run by Envoy Gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
