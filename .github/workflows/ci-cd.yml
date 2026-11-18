@@ -143,7 +143,14 @@ jobs:
           kubectl apply -k k8s
           kubectl -n wisecow rollout status deploy/wisecow --timeout=120s
           kubectl -n wisecow wait certificate/wisecow-tls --for=condition=Ready --timeout=120s
-          kubectl -n wisecow wait gateway/wisecow --for=condition=Programmed --timeout=180s
+          # kind has no cloud load balancer, so the Gateway never gets an external address
+          # (Programmed=False, AddressNotAssigned). Wait for what matters here instead:
+          # the HTTPS listener is programmed and the Envoy proxy is running.
+          kubectl -n wisecow wait gateway/wisecow --for=condition=Accepted --timeout=120s
+          kubectl -n wisecow wait gateway/wisecow --timeout=120s \
+            --for=jsonpath='{.status.listeners[?(@.name=="https")].conditions[?(@.type=="Programmed")].status}'=True
+          kubectl -n envoy-gateway-system wait pod --for=condition=Ready --timeout=120s \
+            -l gateway.envoyproxy.io/owning-gateway-name=wisecow
       - name: Verify HTTPS end to end
         run: |
           echo "127.0.0.1 wisecow.local" | sudo tee -a /etc/hosts

@@ -13,12 +13,12 @@ TC-11,App,Shell script quality,ShellCheck,No findings,Static,CI,Pass
 TC-12,Kubernetes,Manifests are valid,"kubeconform, strict",All resources valid,Static,CI,Pass
 TC-13,Kubernetes,Deployment rolls out,kubectl rollout status,2/2 pods ready,Functional,CI,Pass
 TC-14,Kubernetes,Namespace enforces restricted Pod Security,Apply manifests,Pods admitted (proves they meet restricted),Security,CI,Pass
-TC-15,Kubernetes,Pod self-heals,Delete a pod,Replacement is Ready within 30 s,Reliability,Manual,Pass (manual)
-TC-16,Kubernetes,Liveness probe restarts a hung app,Make /healthz fail,Container restarted,Reliability,Manual,Pass (manual)
+TC-15,Kubernetes,Pod self-heals,Delete a pod,Replacement is Ready within 30 s,Reliability,Manual,To run manually
+TC-16,Kubernetes,Liveness probe restarts a hung app,Make /healthz fail,Container restarted,Reliability,Manual,To run manually
 TC-17,TLS,Certificate issued,kubectl wait certificate --for=Ready,Ready,Functional,CI,Pass
 TC-18,TLS,HTTPS works with the trusted CA,curl --cacert ca.crt https://wisecow.local,"200, cow page",Functional,CI,Pass
 TC-19,TLS,Untrusted certificate rejected,curl without the CA,TLS verification error,Security,CI,Pass
-TC-20,TLS,"Old TLS refused, TLS 1.2+ accepted",curl --tlsv1.2; openssl s_client -tls1_1,1.2+ works; 1.1 fails,Security,CI (1.2) + Manual (1.1),Pass
+TC-20,TLS,"Old TLS refused, TLS 1.2+ accepted",curl --tlsv1.2; openssl s_client -tls1_1,1.2+ works; 1.1 fails,Security,CI (1.2) + Manual (1.1),Pass (TLS 1.2); TLS 1.1 to run manually
 TC-21,TLS,HTTP redirects to HTTPS,GET http://wisecow.local,301 to https://,Security,CI,Pass
 TC-22,TLS,Security headers present,Inspect HTTPS response,"HSTS, CSP, nosniff, X-Frame-Options",Security,CI,Pass
 TC-23,CI/CD,Image pushed to registry,Push to main,ghcr.io/harjot8-arch/wisecow:sha-<commit> and :latest exist,Functional,CI,Pass
