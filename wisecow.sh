@@ -64,12 +64,13 @@ handleRequest() {
 }
 
 prerequisites() {
-	command -v cowsay >/dev/null 2>&1 &&
-		command -v fortune >/dev/null 2>&1 &&
-		command -v nc >/dev/null 2>&1 || {
-		echo "Install prerequisites: fortune-mod cowsay netcat-openbsd" >&2
-		exit 1
-	}
+	local cmd
+	for cmd in fortune cowsay nc; do
+		if ! command -v "$cmd" >/dev/null 2>&1; then
+			echo "Install prerequisites: fortune-mod cowsay netcat-openbsd (missing: $cmd)" >&2
+			exit 1
+		fi
+	done
 }
 
 main() {
